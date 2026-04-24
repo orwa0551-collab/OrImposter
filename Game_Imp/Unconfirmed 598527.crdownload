@@ -1,0 +1,554 @@
+"""
+لعبة الغريب — خادم Flask-SocketIO المتكامل
+Imposter Game — Full-Featured Flask-SocketIO Server
+"""
+
+from flask import Flask, render_template, send_from_directory
+from flask_socketio import SocketIO, emit, join_room, leave_room
+import random
+import threading
+import time
+import os
+
+app = Flask(__name__, static_folder='static', template_folder='.')
+app.config['SECRET_KEY'] = 'imposter-game-secret-2024'
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# ══════════════════════════════════════════════════════════
+#  STATE MANAGEMENT
+# ══════════════════════════════════════════════════════════
+
+games = {}
+# games[room] = {
+#   'players': [],               # list of player names (in join order)
+#   'player_sids': {},           # sid → player_name
+#   'sid_to_player': {},         # sid → player_name
+#   'impostors': [],             # list of player indices who are impostors
+#   'theme': '',                 # round theme
+#   'impostor_count': 1,         # number of impostors
+#   'revealed_players': [],      # list of player indices who confirmed reveal
+#   'votes': {},                 # voter_name → voted_player_index
+#   'phase': 'lobby',            # lobby / reveal / discuss / vote / result
+#   'timer_thread': None,        # server timer thread
+#   'timer_seconds': 180,        # configured duration
+#   'timer_remaining': 180,      # current countdown
+#   'timer_running': False,
+#   'stats': {crewWins, impostorWins, rounds, correctVotes},
+#   'host_sid': '',              # first joiner is host
+# }
+
+THEMES = [
+    'الفواكه والخضروات', 'أنواع الطعام', 'دول العالم', 'ألعاب الفيديو',
+    'الحيوانات البرية', 'الرياضة العالمية', 'أفلام ديزني', 'مهن وأعمال',
+    'أماكن سياحية', 'مشاهير العالم', 'الفضاء والكواكب', 'الألوان والأشكال',
+    'الموسيقى والفنانين', 'الكتب الشهيرة', 'الطقس والمناخ',
+    'العلماء المشهورون', 'الأطعمة الشعبية', 'السيارات', 'الأزياء والموضة', 'التكنولوجيا'
+]
+
+# ══════════════════════════════════════════════════════════
+#  ROUTES
+# ══════════════════════════════════════════════════════════
+
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/health')
+def health():
+    return {'status': 'ok', 'rooms': len(games)}
+
+# ══════════════════════════════════════════════════════════
+#  SOCKET EVENTS — CONNECTION
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('connect')
+def on_connect():
+    print(f'[+] Client connected: {request_sid()}')
+
+@socketio.on('disconnect')
+def on_disconnect():
+    sid = request_sid()
+    print(f'[-] Client disconnected: {sid}')
+    # Remove from any room
+    for room, game in list(games.items()):
+        if sid in game['sid_to_player']:
+            player_name = game['sid_to_player'].pop(sid, None)
+            game['player_sids'].pop(player_name, None)
+            if player_name:
+                emit('player_left', {
+                    'player': player_name,
+                    'players': list(game['player_sids'].keys())
+                }, room=room)
+            # If host left, assign new host
+            if sid == game.get('host_sid') and game['sid_to_player']:
+                new_host_sid = list(game['sid_to_player'].keys())[0]
+                game['host_sid'] = new_host_sid
+                emit('host_changed', {'host': game['sid_to_player'][new_host_sid]}, room=room)
+            break
+
+def request_sid():
+    from flask import request
+    return request.sid
+
+# ══════════════════════════════════════════════════════════
+#  JOIN / CREATE ROOM
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('join_room')
+def on_join_room(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '').strip().upper()
+    player_name = data.get('player_name', '').strip()
+
+    if not room or not player_name:
+        emit('error', {'msg': 'اسم الغرفة واسم اللاعب مطلوبان'})
+        return
+
+    # Create room if needed
+    if room not in games:
+        games[room] = {
+            'players': [],
+            'player_sids': {},       # name → sid
+            'sid_to_player': {},     # sid → name
+            'impostors': [],
+            'theme': '',
+            'impostor_count': 1,
+            'revealed_players': [],
+            'votes': {},
+            'phase': 'lobby',
+            'timer_thread': None,
+            'timer_seconds': 180,
+            'timer_remaining': 180,
+            'timer_running': False,
+            'stats': {'crewWins': 0, 'impostorWins': 0, 'rounds': 0, 'correctVotes': 0},
+            'host_sid': sid,
+        }
+        print(f'[Room] Created: {room}')
+
+    game = games[room]
+
+    # Check name conflict
+    if player_name in game['player_sids']:
+        emit('error', {'msg': 'هذا الاسم مستخدم بالفعل في الغرفة'})
+        return
+
+    # Join
+    join_room(room)
+    game['player_sids'][player_name] = sid
+    game['sid_to_player'][sid] = player_name
+    if player_name not in game['players']:
+        game['players'].append(player_name)
+
+    is_host = (sid == game['host_sid'])
+
+    emit('joined', {
+        'room': room,
+        'player_name': player_name,
+        'players': list(game['player_sids'].keys()),
+        'is_host': is_host,
+        'phase': game['phase'],
+    })
+
+    emit('player_joined', {
+        'player': player_name,
+        'players': list(game['player_sids'].keys()),
+    }, room=room, include_self=False)
+
+    print(f'[Room] {player_name} joined {room} (host={is_host})')
+
+# ══════════════════════════════════════════════════════════
+#  START GAME
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('start_game')
+def on_start_game(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    theme = data.get('theme', '').strip()
+    impostor_count = int(data.get('impostor_count', 1))
+    timer_seconds = int(data.get('timer_seconds', 180))
+
+    if room not in games:
+        emit('error', {'msg': 'الغرفة غير موجودة'})
+        return
+
+    game = games[room]
+
+    if sid != game['host_sid']:
+        emit('error', {'msg': 'فقط المضيف يمكنه بدء اللعبة'})
+        return
+
+    players = list(game['player_sids'].keys())
+    if len(players) < 3:
+        emit('error', {'msg': 'يحتاج على الأقل 3 لاعبين'})
+        return
+
+    if not theme:
+        theme = random.choice(THEMES)
+
+    # Assign impostors
+    max_impostors = max(1, len(players) // 3)
+    actual_impostor_count = min(impostor_count, max_impostors)
+    indices = list(range(len(players)))
+    random.shuffle(indices)
+    impostor_indices = indices[:actual_impostor_count]
+
+    game['theme'] = theme
+    game['impostor_count'] = actual_impostor_count
+    game['impostors'] = impostor_indices
+    game['revealed_players'] = []
+    game['votes'] = {}
+    game['phase'] = 'reveal'
+    game['timer_seconds'] = timer_seconds
+    game['timer_remaining'] = timer_seconds
+    game['timer_running'] = False
+    game['stats']['rounds'] += 1
+
+    # Send each player their individual role (private)
+    for idx, name in enumerate(players):
+        player_sid = game['player_sids'].get(name)
+        if not player_sid:
+            continue
+        is_impostor = idx in impostor_indices
+        role_data = {
+            'player_index': idx,
+            'player_name': name,
+            'is_impostor': is_impostor,
+            'theme': theme if not is_impostor else None,
+            'impostor_count': actual_impostor_count,
+            'total_players': len(players),
+            'players': players,
+            'phase': 'reveal',
+        }
+        socketio.emit('game_started', role_data, room=player_sid)
+
+    # Broadcast game state (without role spoilers)
+    emit('game_state', {
+        'phase': 'reveal',
+        'players': players,
+        'theme_hidden': True,
+        'total_players': len(players),
+        'impostor_count': actual_impostor_count,
+        'revealed_players': [],
+    }, room=room)
+
+    print(f'[Game] Started in {room}: theme={theme}, impostors={impostor_indices}')
+
+# ══════════════════════════════════════════════════════════
+#  REVEAL ROLE (player confirms they saw their role)
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('reveal_role')
+def on_reveal_role(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    player_index = int(data.get('player_index', -1))
+
+    if room not in games:
+        return
+
+    game = games[room]
+    if player_index < 0:
+        return
+
+    if player_index not in game['revealed_players']:
+        game['revealed_players'].append(player_index)
+
+    revealed_count = len(game['revealed_players'])
+    total = len(game['player_sids'])
+    all_revealed = revealed_count >= total
+
+    # Broadcast updated reveal status
+    emit('reveal_status_update', {
+        'revealed_players': game['revealed_players'],
+        'revealed_count': revealed_count,
+        'total': total,
+        'all_revealed': all_revealed,
+    }, room=room)
+
+    if all_revealed:
+        game['phase'] = 'discuss'
+        emit('all_revealed', {
+            'phase': 'discuss',
+            'message': '✅ الجميع كشف دوره! يمكنكم بدء النقاش.'
+        }, room=room)
+        print(f'[Game] All players revealed in {room}')
+
+# ══════════════════════════════════════════════════════════
+#  TIMER
+# ══════════════════════════════════════════════════════════
+
+def run_timer(room, duration):
+    """Server-side synchronized timer"""
+    game = games.get(room)
+    if not game:
+        return
+
+    game['timer_remaining'] = duration
+    game['timer_running'] = True
+
+    while game['timer_remaining'] > 0 and game.get('timer_running'):
+        time.sleep(1)
+        if not game.get('timer_running'):
+            break
+        game['timer_remaining'] -= 1
+        socketio.emit('timer_tick', {
+            'remaining': game['timer_remaining'],
+            'total': duration,
+        }, room=room)
+
+    if game.get('timer_running') and game['timer_remaining'] <= 0:
+        game['timer_running'] = False
+        socketio.emit('timer_ended', {
+            'message': '⏰ انتهى وقت النقاش! حان وقت التصويت.'
+        }, room=room)
+        print(f'[Timer] Ended in {room}')
+
+
+@socketio.on('start_timer')
+def on_start_timer(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    duration = int(data.get('duration', 180))
+
+    if room not in games:
+        return
+
+    game = games[room]
+
+    # Stop existing timer
+    game['timer_running'] = False
+    if game.get('timer_thread') and game['timer_thread'].is_alive():
+        game['timer_thread'].join(timeout=2)
+
+    # Broadcast timer start
+    emit('timer_started', {
+        'duration': duration,
+        'remaining': duration,
+    }, room=room)
+
+    # Start server-side timer in background thread
+    t = threading.Thread(target=run_timer, args=(room, duration), daemon=True)
+    game['timer_thread'] = t
+    t.start()
+    print(f'[Timer] Started in {room}: {duration}s')
+
+
+@socketio.on('pause_timer')
+def on_pause_timer(data):
+    room = data.get('room', '')
+    if room in games:
+        games[room]['timer_running'] = False
+        emit('timer_paused', {'remaining': games[room]['timer_remaining']}, room=room)
+        print(f'[Timer] Paused in {room}')
+
+
+@socketio.on('reset_timer')
+def on_reset_timer(data):
+    room = data.get('room', '')
+    duration = int(data.get('duration', 180))
+    if room in games:
+        games[room]['timer_running'] = False
+        games[room]['timer_remaining'] = duration
+        emit('timer_reset', {'duration': duration, 'remaining': duration}, room=room)
+        print(f'[Timer] Reset in {room}')
+
+# ══════════════════════════════════════════════════════════
+#  VOTING
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('cast_vote')
+def on_cast_vote(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    voter_name = data.get('voter_name', '')
+    target_index = int(data.get('target_index', -1))
+
+    if room not in games or target_index < 0:
+        return
+
+    game = games[room]
+    game['votes'][voter_name] = target_index
+
+    players = list(game['player_sids'].keys())
+    vote_counts = [0] * len(players)
+    for v in game['votes'].values():
+        if 0 <= v < len(vote_counts):
+            vote_counts[v] += 1
+
+    emit('vote_update', {
+        'votes': game['votes'],
+        'vote_counts': vote_counts,
+        'voters_count': len(game['votes']),
+        'total_players': len(players),
+    }, room=room)
+
+    print(f'[Vote] {voter_name} voted for {players[target_index]} in {room}')
+
+
+@socketio.on('reveal_result')
+def on_reveal_result(data):
+    from flask import request
+    room = data.get('room', '')
+
+    if room not in games:
+        return
+
+    game = games[room]
+    game['timer_running'] = False
+    players = list(game['player_sids'].keys())
+
+    # Tally votes
+    vote_counts = [0] * len(players)
+    for v in game['votes'].values():
+        if 0 <= v < len(vote_counts):
+            vote_counts[v] += 1
+
+    max_votes = max(vote_counts) if vote_counts else 0
+    eliminated_index = vote_counts.index(max_votes)
+    was_impostor = eliminated_index in game['impostors']
+
+    # Update stats
+    if was_impostor:
+        game['stats']['crewWins'] += 1
+        game['stats']['correctVotes'] += 1
+    else:
+        game['stats']['impostorWins'] += 1
+
+    game['phase'] = 'result'
+
+    # Full reveal for result screen
+    roles = []
+    for idx, name in enumerate(players):
+        roles.append({
+            'index': idx,
+            'name': name,
+            'is_impostor': idx in game['impostors'],
+            'votes': vote_counts[idx],
+        })
+
+    emit('game_result', {
+        'eliminated_index': eliminated_index,
+        'eliminated_name': players[eliminated_index] if players else '?',
+        'was_impostor': was_impostor,
+        'vote_counts': vote_counts,
+        'roles': roles,
+        'theme': game['theme'],
+        'stats': game['stats'],
+    }, room=room)
+
+    print(f'[Result] Room {room}: eliminated={players[eliminated_index]}, was_impostor={was_impostor}')
+
+# ══════════════════════════════════════════════════════════
+#  CHAT
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('chat_message')
+def on_chat_message(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    sender = data.get('sender', 'مجهول')
+    message = data.get('message', '').strip()
+    emoji_only = data.get('emoji_only', False)
+
+    if not message or len(message) > 200:
+        return
+
+    emit('chat_message', {
+        'sender': sender,
+        'message': message,
+        'emoji_only': emoji_only,
+        'sid': sid,
+    }, room=room)
+
+
+@socketio.on('typing')
+def on_typing(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    player = data.get('player', '')
+    is_typing = data.get('is_typing', False)
+
+    emit('player_typing', {
+        'player': player,
+        'is_typing': is_typing,
+    }, room=room, include_self=False)
+
+# ══════════════════════════════════════════════════════════
+#  NEW ROUND
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('new_round')
+def on_new_round(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+
+    if room not in games:
+        return
+
+    game = games[room]
+
+    if sid != game['host_sid']:
+        emit('error', {'msg': 'فقط المضيف يمكنه بدء جولة جديدة'})
+        return
+
+    # Reset round state but keep players & stats
+    game['impostors'] = []
+    game['revealed_players'] = []
+    game['votes'] = {}
+    game['phase'] = 'lobby'
+    game['timer_running'] = False
+    game['timer_remaining'] = game['timer_seconds']
+
+    emit('new_round_started', {
+        'phase': 'lobby',
+        'players': list(game['player_sids'].keys()),
+        'stats': game['stats'],
+    }, room=room)
+
+    print(f'[Game] New round started in {room}')
+
+# ══════════════════════════════════════════════════════════
+#  GO TO PHASE (host navigation)
+# ══════════════════════════════════════════════════════════
+
+@socketio.on('go_phase')
+def on_go_phase(data):
+    from flask import request
+    sid = request.sid
+    room = data.get('room', '')
+    phase = data.get('phase', '')
+
+    if room not in games:
+        return
+
+    game = games[room]
+    if sid != game['host_sid']:
+        return
+
+    game['phase'] = phase
+    emit('phase_changed', {'phase': phase}, room=room)
+    print(f'[Phase] {room} → {phase}')
+
+# ══════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"""
+╔══════════════════════════════════════╗
+║      لعبة الغريب — الخادم           ║
+║      Imposter Game Server            ║
+║      http://localhost:{port}           ║
+╚══════════════════════════════════════╝
+    """)
+    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True)

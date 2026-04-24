@@ -1,0 +1,1617 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>لعبة الغريب — متعدد اللاعبين</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<!-- Socket.io Client -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+:root {
+  --red: #e63946;
+  --dark-red: #9d0208;
+  --teal: #2ec4b6;
+  --gold: #ffd166;
+  --purple: #6c63ff;
+  --black: #080810;
+  --dark: #0e0e1a;
+  --card: #12121e;
+  --card2: #18182a;
+  --border: #1e1e30;
+  --border2: #2a2a40;
+  --white: #f0f0ff;
+  --gray: #8888aa;
+  --light: #ccccee;
+  --glow-red: rgba(230,57,70,0.4);
+  --glow-teal: rgba(46,196,182,0.35);
+  --glow-gold: rgba(255,209,102,0.35);
+  --glow-purple: rgba(108,99,255,0.35);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  font-family:'Tajawal',sans-serif;
+  background:var(--black);
+  color:var(--white);
+  min-height:100vh;
+  overflow-x:hidden;
+}
+body::before {
+  content:'';
+  position:fixed; inset:0;
+  background:
+    radial-gradient(ellipse at 15% 40%, rgba(230,57,70,0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 15%, rgba(108,99,255,0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 95%, rgba(46,196,182,0.05) 0%, transparent 60%);
+  pointer-events:none; z-index:0;
+}
+.stars { position:fixed; inset:0; pointer-events:none; z-index:0; overflow:hidden; }
+.star {
+  position:absolute; background:white; border-radius:50%;
+  animation:twinkle var(--dur) ease-in-out infinite;
+}
+@keyframes twinkle {
+  0%,100%{opacity:0.08;transform:scale(1);}
+  50%{opacity:0.7;transform:scale(1.6);}
+}
+
+/* ── LAYOUT ─────────────────────────────────────────────── */
+.page {
+  position:relative; z-index:1;
+  max-width:640px; margin:0 auto;
+  padding:20px 16px 40px;
+  min-height:100vh;
+  display:flex; flex-direction:column;
+  align-items:center;
+}
+.hidden { display:none !important; }
+
+/* ── HEADER ─────────────────────────────────────────────── */
+.game-header { text-align:center; margin-bottom:32px; animation:fadeDown .7s ease both; }
+.game-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  font-size:11px; letter-spacing:4px; color:var(--red);
+  text-transform:uppercase; font-weight:700; margin-bottom:10px;
+}
+.game-badge span { width:28px; height:1px; background:var(--red); opacity:.5; }
+.game-title {
+  font-size:clamp(44px,11vw,80px); font-weight:900; line-height:.9;
+  background:linear-gradient(135deg,#fff 0%,#bbb 40%,var(--red) 100%);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  letter-spacing:-2px; margin-bottom:6px;
+}
+.game-sub { font-size:13px; color:var(--gray); letter-spacing:2px; }
+
+/* ── STEP DOTS ─────────────────────────────────────────── */
+.steps { display:flex; gap:6px; margin-bottom:28px; justify-content:center; }
+.step-dot { width:7px; height:7px; border-radius:4px; background:var(--border2); transition:all .4s; }
+.step-dot.active { width:28px; background:var(--red); box-shadow:0 0 10px var(--glow-red); }
+.step-dot.done { background:#2a2a40; }
+
+/* ── CARDS ──────────────────────────────────────────────── */
+.card {
+  background:var(--card); border:1px solid var(--border2);
+  border-radius:22px; padding:28px 24px; width:100%;
+  animation:fadeUp .5s ease both; position:relative; overflow:hidden;
+}
+.card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg,transparent,var(--red),transparent);
+}
+.card + .card { margin-top:16px; }
+.section-title {
+  font-size:11px; font-weight:700; letter-spacing:3px; color:var(--red);
+  text-transform:uppercase; margin-bottom:18px;
+  display:flex; align-items:center; gap:10px;
+}
+.section-title::after { content:''; flex:1; height:1px; background:var(--border2); }
+.divider { height:1px; background:var(--border); margin:20px 0; }
+
+/* ── NUMBER SELECTOR ─────────────────────────────────────── */
+.number-selector { display:flex; align-items:center; justify-content:center; gap:24px; margin:16px 0; }
+.num-btn {
+  width:52px; height:52px; border-radius:50%;
+  border:2px solid var(--border2); background:transparent;
+  color:var(--white); font-size:22px; cursor:pointer;
+  transition:all .2s; display:flex; align-items:center; justify-content:center;
+  font-family:'Tajawal',sans-serif;
+}
+.num-btn:hover { border-color:var(--red); color:var(--red); background:rgba(230,57,70,.1); box-shadow:0 0 18px var(--glow-red); }
+.num-display { font-size:68px; font-weight:900; color:var(--white); min-width:80px; text-align:center; line-height:1; }
+.num-label { font-size:12px; color:var(--gray); text-align:center; margin-top:4px; }
+.num-info { font-size:12px; color:var(--gray); text-align:center; margin-top:8px; }
+
+/* ── INPUT FIELDS ────────────────────────────────────────── */
+.field-group { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
+.field-label { font-size:12px; color:var(--gray); letter-spacing:1px; }
+.name-input, .theme-input, .room-input {
+  background:rgba(255,255,255,.04); border:1px solid var(--border2);
+  border-radius:12px; padding:13px 16px; color:var(--white);
+  font-family:'Tajawal',sans-serif; font-size:15px; outline:none; transition:all .2s;
+  width:100%;
+}
+.name-input:focus, .theme-input:focus, .room-input:focus {
+  border-color:var(--red); background:rgba(230,57,70,.05); box-shadow:0 0 0 3px rgba(230,57,70,.1);
+}
+.name-input::placeholder, .theme-input::placeholder, .room-input::placeholder { color:#3a3a55; }
+.theme-row { display:flex; gap:10px; align-items:center; }
+.theme-input { flex:1; }
+.random-btn {
+  padding:13px 18px; border-radius:12px; border:1px solid var(--border2);
+  background:rgba(255,209,102,.08); color:var(--gold); font-size:18px;
+  cursor:pointer; transition:all .2s; flex-shrink:0;
+}
+.random-btn:hover { background:rgba(255,209,102,.18); border-color:var(--gold); box-shadow:0 0 15px var(--glow-gold); }
+.theme-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+.chip {
+  padding:5px 12px; border-radius:20px; border:1px solid var(--border2);
+  font-size:12px; color:var(--gray); cursor:pointer; transition:all .2s;
+  font-family:'Tajawal',sans-serif;
+}
+.chip:hover { border-color:var(--red); color:var(--red); background:rgba(230,57,70,.08); }
+
+/* ── IMPOSTOR TOGGLE ─────────────────────────────────────── */
+.impostor-toggle { display:flex; gap:10px; margin:12px 0; }
+.toggle-btn {
+  flex:1; padding:11px; border-radius:12px; border:1px solid var(--border2);
+  background:transparent; color:var(--gray); font-family:'Tajawal',sans-serif;
+  font-size:14px; font-weight:700; cursor:pointer; transition:all .25s;
+}
+.toggle-btn.active {
+  border-color:var(--red); color:white; background:rgba(230,57,70,.15);
+  box-shadow:0 0 15px rgba(230,57,70,.2);
+}
+
+/* ── LOBBY PLAYERS LIST ──────────────────────────────────── */
+.lobby-players { display:flex; flex-direction:column; gap:8px; margin:12px 0; }
+.lobby-player {
+  display:flex; align-items:center; gap:12px;
+  background:rgba(255,255,255,.03); border:1px solid var(--border2);
+  border-radius:12px; padding:12px 16px;
+  animation:slideIn .3s ease both;
+}
+.lobby-player .p-avatar {
+  width:38px; height:38px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px; flex-shrink:0;
+}
+.lobby-player .p-name { font-size:14px; font-weight:700; }
+.lobby-player .p-host { font-size:10px; color:var(--gold); letter-spacing:1px; }
+.room-code {
+  display:inline-flex; align-items:center; gap:8px;
+  background:rgba(108,99,255,.1); border:1px solid rgba(108,99,255,.3);
+  border-radius:12px; padding:10px 18px; font-size:18px; font-weight:900;
+  letter-spacing:4px; color:var(--purple); cursor:pointer;
+  transition:all .2s; margin:12px auto; width:fit-content;
+}
+.room-code:hover { background:rgba(108,99,255,.2); }
+.room-code small { font-size:11px; color:var(--gray); letter-spacing:1px; font-weight:400; }
+.waiting-indicator {
+  display:flex; align-items:center; gap:8px; justify-content:center;
+  font-size:13px; color:var(--gray); margin:8px 0;
+}
+.dot-pulse { display:flex; gap:4px; }
+.dot-pulse span {
+  width:6px; height:6px; border-radius:50%; background:var(--teal);
+  animation:dotPulse 1.4s infinite ease-in-out;
+}
+.dot-pulse span:nth-child(2) { animation-delay:.2s; }
+.dot-pulse span:nth-child(3) { animation-delay:.4s; }
+@keyframes dotPulse { 0%,80%,100%{transform:scale(0.7);opacity:.5;}40%{transform:scale(1);opacity:1;} }
+
+/* ── BUTTONS ────────────────────────────────────────────── */
+.btn {
+  width:100%; padding:15px; border-radius:13px; border:none;
+  font-family:'Tajawal',sans-serif; font-size:16px; font-weight:700;
+  cursor:pointer; transition:all .3s; letter-spacing:1px; margin-top:18px;
+  position:relative; overflow:hidden;
+}
+.btn::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(135deg,rgba(255,255,255,.07),transparent);
+  border-radius:13px;
+}
+.btn-primary { background:var(--red); color:white; box-shadow:0 4px 25px rgba(230,57,70,.35); }
+.btn-primary:hover { background:#d12030; transform:translateY(-2px); box-shadow:0 8px 35px rgba(230,57,70,.45); }
+.btn-primary:active { transform:translateY(0); }
+.btn-secondary { background:transparent; color:var(--gray); border:1px solid var(--border2); margin-top:10px; }
+.btn-secondary:hover { color:var(--light); background:rgba(255,255,255,.04); }
+.btn-teal { background:var(--teal); color:#0a0a0a; box-shadow:0 4px 25px rgba(46,196,182,.35); }
+.btn-teal:hover { transform:translateY(-2px); box-shadow:0 8px 35px rgba(46,196,182,.5); }
+.btn-gold { background:var(--gold); color:#0a0a0a; box-shadow:0 4px 25px rgba(255,209,102,.35); font-weight:900; }
+.btn-gold:hover { transform:translateY(-2px); box-shadow:0 8px 35px rgba(255,209,102,.5); }
+.btn-purple { background:var(--purple); color:white; box-shadow:0 4px 25px rgba(108,99,255,.35); }
+.btn-purple:hover { transform:translateY(-2px); }
+.btn:disabled { opacity:.5; cursor:not-allowed; transform:none !important; }
+
+/* ── PLAYERS REVEAL GRID ─────────────────────────────────── */
+.players-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
+  gap:10px; margin:14px 0;
+}
+.player-card {
+  background:rgba(255,255,255,.03); border:1px solid var(--border2);
+  border-radius:16px; padding:18px 10px; text-align:center;
+  cursor:pointer; transition:all .3s; position:relative; overflow:hidden;
+  animation:fadeUp .4s ease both;
+}
+.player-card::before {
+  content:''; position:absolute; inset:0; opacity:0; transition:opacity .3s;
+  background:radial-gradient(circle at center,rgba(230,57,70,.15),transparent 70%);
+}
+.player-card:hover:not(.done-card) { border-color:var(--red); transform:translateY(-3px); box-shadow:0 8px 30px rgba(0,0,0,.5); }
+.player-card:hover:not(.done-card)::before { opacity:1; }
+.player-card.done-card { cursor:default; opacity:.55; }
+.player-card.my-card { border-color:var(--gold); background:rgba(255,209,102,.05); }
+.p-avatar {
+  width:52px; height:52px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:22px; margin:0 auto 10px;
+}
+.p-name { font-size:13px; font-weight:700; color:var(--white); margin-bottom:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.p-tap { font-size:10px; color:#44445a; }
+.p-revealed-icon {
+  position:absolute; top:7px; right:7px;
+  width:20px; height:20px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:900;
+}
+.reveal-status {
+  display:flex; align-items:center; gap:8px;
+  background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px;
+  padding:10px 14px; margin-bottom:14px; font-size:13px; color:var(--gray);
+}
+.reveal-status strong { color:var(--white); }
+.progress-bar { flex:1; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+.progress-fill { height:100%; background:var(--teal); border-radius:2px; transition:width .4s; }
+
+/* ── INFO BAR ───────────────────────────────────────────── */
+.info-bar {
+  background:rgba(230,57,70,.07); border:1px solid rgba(230,57,70,.2);
+  border-radius:11px; padding:11px 15px; font-size:13px; color:var(--gray);
+  text-align:center; margin-bottom:14px; line-height:1.65;
+}
+.info-bar strong { color:var(--red); }
+.info-bar.teal { background:rgba(46,196,182,.07); border-color:rgba(46,196,182,.2); }
+.info-bar.teal strong { color:var(--teal); }
+.info-bar.gold { background:rgba(255,209,102,.07); border-color:rgba(255,209,102,.2); }
+.info-bar.gold strong { color:var(--gold); }
+
+/* ── REVEAL OVERLAY ─────────────────────────────────────── */
+.reveal-overlay {
+  position:fixed; inset:0; background:rgba(4,4,12,.97);
+  z-index:200; display:flex; align-items:center; justify-content:center;
+  animation:fadeIn .25s ease;
+}
+.reveal-box {
+  text-align:center; padding:40px 30px; max-width:420px; width:92%;
+  border-radius:24px; border:1px solid var(--border2);
+  background:var(--card); position:relative;
+}
+.reveal-icon { font-size:76px; margin-bottom:22px; animation:popIn .5s cubic-bezier(.34,1.56,.64,1) both; display:block; }
+.reveal-role { font-size:11px; letter-spacing:5px; font-weight:700; margin-bottom:10px; text-transform:uppercase; }
+.reveal-pname { font-size:clamp(28px,7vw,46px); font-weight:900; margin-bottom:8px; }
+.reveal-word {
+  font-size:20px; font-weight:500; margin-bottom:28px;
+  padding:12px 22px; border-radius:12px; display:inline-block;
+}
+.reveal-desc { font-size:13.5px; color:var(--gray); line-height:1.75; margin-bottom:28px; }
+.close-reveal {
+  padding:14px 40px; border-radius:12px; border:none;
+  font-family:'Tajawal',sans-serif; font-size:15px; font-weight:700; cursor:pointer; transition:all .2s;
+}
+.close-reveal:hover { transform:translateY(-2px); }
+.impostor-theme .reveal-role,.impostor-theme .reveal-pname { color:var(--red); }
+.impostor-theme .reveal-word { background:rgba(230,57,70,.1); border:1px solid rgba(230,57,70,.3); color:#ff7070; }
+.impostor-theme .reveal-icon { filter:drop-shadow(0 0 30px rgba(230,57,70,.8)); }
+.impostor-theme .close-reveal { background:var(--red); color:white; box-shadow:0 4px 25px var(--glow-red); }
+.crew-theme .reveal-role,.crew-theme .reveal-pname { color:var(--teal); }
+.crew-theme .reveal-word { background:rgba(46,196,182,.1); border:1px solid rgba(46,196,182,.3); color:#5ee7df; }
+.crew-theme .reveal-icon { filter:drop-shadow(0 0 30px rgba(46,196,182,.8)); }
+.crew-theme .close-reveal { background:var(--teal); color:#060608; box-shadow:0 4px 25px var(--glow-teal); }
+
+/* ── TIMER ──────────────────────────────────────────────── */
+.timer-section {
+  display:flex; flex-direction:column; align-items:center;
+  background:rgba(255,255,255,.03); border:1px solid var(--border2);
+  border-radius:16px; padding:18px; margin:14px 0;
+}
+.timer-label { font-size:11px; letter-spacing:3px; color:var(--gray); text-transform:uppercase; margin-bottom:8px; }
+.timer-display {
+  font-size:56px; font-weight:900; letter-spacing:-2px;
+  color:var(--white); line-height:1; margin-bottom:10px; transition:color .3s;
+}
+.timer-display.warning { color:var(--red); animation:pulse-red 1s infinite; }
+.timer-ring { width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin-bottom:10px; }
+.timer-fill { height:100%; background:var(--teal); border-radius:3px; transition:width 1s linear, background .3s; }
+.timer-fill.warning { background:var(--red); }
+.timer-btns { display:flex; gap:10px; }
+.timer-btn {
+  padding:8px 18px; border-radius:10px; border:1px solid var(--border2);
+  background:transparent; color:var(--gray); font-family:'Tajawal',sans-serif;
+  font-size:13px; font-weight:700; cursor:pointer; transition:all .2s;
+}
+.timer-btn:hover { border-color:var(--red); color:var(--red); }
+.timer-btn.active { background:var(--red); border-color:var(--red); color:white; }
+.timer-presets { display:flex; gap:8px; margin-bottom:10px; }
+.preset-btn {
+  flex:1; padding:8px; border-radius:9px; border:1px solid var(--border2);
+  background:transparent; color:var(--gray); font-family:'Tajawal',sans-serif;
+  font-size:12px; cursor:pointer; transition:all .2s;
+}
+.preset-btn:hover,.preset-btn.sel { border-color:var(--teal); color:var(--teal); background:rgba(46,196,182,.08); }
+
+/* ── CHAT ───────────────────────────────────────────────── */
+.chat-section {
+  background:rgba(255,255,255,.02); border:1px solid var(--border);
+  border-radius:16px; overflow:hidden; margin:14px 0;
+}
+.chat-header {
+  padding:12px 16px; border-bottom:1px solid var(--border);
+  font-size:12px; letter-spacing:2px; color:var(--gray); text-transform:uppercase;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.chat-toggle { background:none; border:none; color:var(--gray); cursor:pointer; font-size:16px; transition:color .2s; }
+.chat-toggle:hover { color:var(--red); }
+.chat-msgs { height:180px; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; }
+.chat-msgs::-webkit-scrollbar { width:4px; }
+.chat-msgs::-webkit-scrollbar-thumb { background:#2a2a40; border-radius:2px; }
+.chat-msg { display:flex; gap:8px; animation:slideIn .2s ease; }
+.chat-msg .msg-name { font-size:11px; font-weight:700; margin-bottom:2px; }
+.chat-msg .msg-bubble {
+  background:rgba(255,255,255,.05); border-radius:0 10px 10px 10px;
+  padding:8px 12px; font-size:13px; line-height:1.5; max-width:calc(100% - 44px);
+}
+.chat-msg.system .msg-bubble {
+  background:rgba(46,196,182,.08); border:1px solid rgba(46,196,182,.2);
+  color:var(--teal); font-size:12px; text-align:center; width:100%;
+}
+.chat-msg.mine { flex-direction:row-reverse; }
+.chat-msg.mine .msg-bubble { border-radius:10px 0 10px 10px; background:rgba(230,57,70,.12); }
+.typing-indicator { font-size:11px; color:var(--gray); padding:0 12px 8px; height:20px; }
+.chat-input-row { display:flex; gap:8px; padding:10px; border-top:1px solid var(--border); }
+.chat-input {
+  flex:1; background:rgba(255,255,255,.04); border:1px solid var(--border2);
+  border-radius:9px; padding:10px 13px; color:var(--white);
+  font-family:'Tajawal',sans-serif; font-size:14px; outline:none; transition:all .2s;
+}
+.chat-input:focus { border-color:var(--red); }
+.chat-input::placeholder { color:#3a3a55; }
+.send-btn {
+  padding:10px 16px; border-radius:9px; background:var(--red); border:none;
+  color:white; cursor:pointer; font-size:16px; transition:all .2s; flex-shrink:0;
+}
+.send-btn:hover { background:#d12030; }
+.emoji-bar { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--border); flex-wrap:wrap; }
+.emoji-btn {
+  background:rgba(255,255,255,.04); border:1px solid var(--border2);
+  border-radius:8px; padding:5px 10px; cursor:pointer; font-size:16px; transition:all .15s;
+}
+.emoji-btn:hover { background:rgba(255,255,255,.1); transform:scale(1.15); }
+.floating-emoji {
+  position:fixed; pointer-events:none; z-index:300;
+  font-size:32px; animation:floatUp 1.5s ease-out forwards;
+}
+@keyframes floatUp { 0%{opacity:1;transform:translateY(0) scale(1);}100%{opacity:0;transform:translateY(-140px) scale(1.5);} }
+
+/* ── VOTING ─────────────────────────────────────────────── */
+.vote-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; margin:14px 0; }
+.vote-card {
+  background:rgba(255,255,255,.03); border:2px solid var(--border2);
+  border-radius:16px; padding:18px 12px; text-align:center;
+  cursor:pointer; transition:all .25s; position:relative; overflow:hidden;
+  animation:fadeUp .4s ease both;
+}
+.vote-card:hover:not(.voted-card) { border-color:var(--red); transform:translateY(-2px); }
+.vote-card.my-vote { border-color:var(--red); background:rgba(230,57,70,.1); }
+.vote-card.voted-card { cursor:default; }
+.vote-count-bar {
+  position:absolute; bottom:0; left:0; right:0;
+  height:3px; background:var(--red); transition:width .5s ease;
+}
+.vote-count-num { font-size:11px; color:var(--gray); margin-top:6px; }
+
+/* ── RESULTS ────────────────────────────────────────────── */
+.result-banner {
+  text-align:center; padding:32px 24px; border-radius:22px;
+  animation:popIn .6s cubic-bezier(.34,1.56,.64,1) both;
+}
+.result-banner.impostor-wins { background:linear-gradient(135deg,rgba(230,57,70,.15),rgba(157,2,8,.1)); border:1px solid rgba(230,57,70,.3); }
+.result-banner.crew-wins { background:linear-gradient(135deg,rgba(46,196,182,.15),rgba(0,100,90,.1)); border:1px solid rgba(46,196,182,.3); }
+.result-icon { font-size:80px; margin-bottom:16px; display:block; animation:popIn .5s .2s cubic-bezier(.34,1.56,.64,1) both; }
+.result-title { font-size:clamp(24px,6vw,40px); font-weight:900; margin-bottom:6px; }
+.result-sub { font-size:14px; color:var(--gray); margin-bottom:24px; }
+.result-reveals { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; margin:20px 0; }
+.result-player-card {
+  border-radius:14px; padding:14px 10px; text-align:center; border:1px solid var(--border2);
+  animation:fadeUp .4s ease both;
+}
+.result-player-card.is-impostor { background:rgba(230,57,70,.1); border-color:rgba(230,57,70,.4); }
+.result-player-card.is-crew { background:rgba(46,196,182,.05); }
+.result-role-badge { font-size:10px; font-weight:700; letter-spacing:2px; margin-top:6px; }
+
+/* ── STATS ──────────────────────────────────────────────── */
+.stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.stat-box { background:rgba(255,255,255,.03); border:1px solid var(--border2); border-radius:14px; padding:16px; text-align:center; }
+.stat-num { font-size:36px; font-weight:900; line-height:1; margin-bottom:4px; }
+.stat-label { font-size:11px; color:var(--gray); letter-spacing:1px; }
+
+/* ── CONNECTION STATUS ───────────────────────────────────── */
+.conn-badge {
+  position:fixed; top:16px; right:16px; z-index:50;
+  display:flex; align-items:center; gap:6px;
+  background:var(--card); border:1px solid var(--border2);
+  border-radius:20px; padding:6px 12px; font-size:11px; color:var(--gray);
+  transition:all .3s;
+}
+.conn-dot { width:8px; height:8px; border-radius:50%; background:var(--gray); transition:background .3s; }
+.conn-badge.connected .conn-dot { background:#06d6a0; box-shadow:0 0 8px rgba(6,214,160,.5); }
+.conn-badge.connected { color:var(--light); }
+.conn-badge.disconnected .conn-dot { background:var(--red); }
+
+/* ── SOUND INDICATOR ─────────────────────────────────────── */
+.sound-btn {
+  position:fixed; top:16px; left:16px; z-index:50;
+  width:38px; height:38px; border-radius:50%;
+  background:var(--card); border:1px solid var(--border2);
+  color:var(--gray); font-size:16px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:all .2s;
+}
+.sound-btn:hover { color:var(--white); }
+
+/* ── TOAST ───────────────────────────────────────────────── */
+.toast-container { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:400; display:flex; flex-direction:column; gap:8px; align-items:center; }
+.toast {
+  background:var(--card2); border:1px solid var(--border2); border-radius:12px;
+  padding:12px 20px; font-size:14px; font-weight:600; color:var(--white);
+  animation:slideUp .3s ease, fadeOut .3s ease 2.7s forwards; white-space:nowrap;
+  box-shadow:0 8px 30px rgba(0,0,0,.5);
+}
+@keyframes slideUp { from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);} }
+@keyframes fadeOut { from{opacity:1;}to{opacity:0;} }
+
+/* ── CONFIRM MODAL ───────────────────────────────────────── */
+.modal-overlay { position:fixed; inset:0; background:rgba(4,4,12,.92); z-index:250; display:flex; align-items:center; justify-content:center; animation:fadeIn .2s; }
+.modal-box { background:var(--card2); border:1px solid var(--border2); border-radius:20px; padding:32px 28px; max-width:360px; width:90%; text-align:center; }
+.modal-icon { font-size:48px; margin-bottom:14px; }
+.modal-title { font-size:20px; font-weight:900; margin-bottom:8px; }
+.modal-sub { font-size:14px; color:var(--gray); margin-bottom:24px; }
+.modal-btns { display:flex; gap:10px; }
+.modal-btns button { flex:1; padding:12px; border-radius:11px; border:none; font-family:'Tajawal',sans-serif; font-size:15px; font-weight:700; cursor:pointer; transition:all .2s; }
+.modal-confirm { background:var(--red); color:white; }
+.modal-confirm:hover { background:#d12030; }
+.modal-cancel { background:rgba(255,255,255,.06); color:var(--gray); }
+.modal-cancel:hover { color:var(--white); }
+
+/* ── TIMER ALERT ─────────────────────────────────────────── */
+#timer-alert { position:fixed; inset:0; background:rgba(4,4,12,.97); z-index:200; display:flex; align-items:center; justify-content:center; animation:fadeIn .25s ease; }
+
+/* ── ANIMATIONS ──────────────────────────────────────────── */
+@keyframes fadeDown { from{opacity:0;transform:translateY(-20px);}to{opacity:1;transform:translateY(0);} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);} }
+@keyframes slideIn { from{opacity:0;transform:translateX(-10px);}to{opacity:1;transform:translateX(0);} }
+@keyframes fadeIn { from{opacity:0;}to{opacity:1;} }
+@keyframes popIn { from{opacity:0;transform:scale(.3) rotate(-15deg);}to{opacity:1;transform:scale(1) rotate(0);} }
+@keyframes pulse-red { 0%,100%{box-shadow:0 0 0 0 rgba(230,57,70,.5);}50%{box-shadow:0 0 0 14px rgba(230,57,70,0);} }
+@keyframes shake { 0%,100%{transform:translateX(0);}20%,60%{transform:translateX(-6px);}40%,80%{transform:translateX(6px);} }
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#2a2a40; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div class="stars" id="stars"></div>
+<button class="sound-btn" id="sound-btn" title="صوت" onclick="toggleSound()">🔊</button>
+<div class="conn-badge" id="conn-badge"><div class="conn-dot"></div><span id="conn-text">جاري الاتصال...</span></div>
+<div class="toast-container" id="toast-container"></div>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="game-header">
+    <div class="game-badge"><span></span>لعبة الغريب<span></span></div>
+    <h1 class="game-title">IMPOSTER</h1>
+    <div class="game-sub">من بينكم غريب؟</div>
+  </div>
+
+  <!-- STEP DOTS -->
+  <div class="steps" id="step-dots">
+    <div class="step-dot active" id="dot1"></div>
+    <div class="step-dot" id="dot2"></div>
+    <div class="step-dot" id="dot3"></div>
+    <div class="step-dot" id="dot4"></div>
+    <div class="step-dot" id="dot5"></div>
+  </div>
+
+  <!-- ══ STEP 0: JOIN / CREATE ROOM ════════════════════════ -->
+  <div class="card" id="step0">
+    <div class="section-title">الانضمام للعبة</div>
+
+    <div class="field-group">
+      <div class="field-label">اسمك في اللعبة</div>
+      <input class="name-input" id="my-name-input" placeholder="مثال: أحمد، سارة..." maxlength="18">
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="field-group">
+      <div class="field-label">كود الغرفة (أو اتركه فارغاً لإنشاء غرفة جديدة)</div>
+      <input class="room-input" id="room-code-input" placeholder="مثال: GAME" maxlength="8" style="text-transform:uppercase;letter-spacing:3px;text-align:center;font-size:20px;font-weight:900">
+    </div>
+
+    <button class="btn btn-primary" onclick="joinOrCreate()">🚀 انضم أو أنشئ غرفة</button>
+  </div>
+
+  <!-- ══ STEP 1: LOBBY ══════════════════════════════════════ -->
+  <div class="card hidden" id="step1">
+    <div class="section-title">الغرفة</div>
+
+    <div style="text-align:center;margin-bottom:16px">
+      <div class="room-code" id="room-code-display" onclick="copyRoomCode()" title="انقر للنسخ">
+        <small>كود الغرفة</small>
+        <span id="room-code-text">????</span>
+        📋
+      </div>
+      <div style="font-size:11px;color:var(--gray)">شارك هذا الكود مع أصدقائك</div>
+    </div>
+
+    <div class="section-title">اللاعبون</div>
+    <div class="lobby-players" id="lobby-players"></div>
+
+    <div class="waiting-indicator" id="waiting-indicator">
+      <div class="dot-pulse"><span></span><span></span><span></span></div>
+      <span id="waiting-text">في انتظار المزيد من اللاعبين...</span>
+    </div>
+
+    <!-- Host-only settings -->
+    <div id="host-settings" class="hidden">
+      <div class="divider"></div>
+      <div class="section-title">إعدادات الجولة</div>
+
+      <div class="field-group">
+        <div class="field-label">موضوع الجولة</div>
+        <div class="theme-row">
+          <input class="theme-input" id="theme-input" placeholder="مثال: أنواع الفواكه، دول العالم...">
+          <button class="random-btn" onclick="randomTheme()" title="موضوع عشوائي">🎲</button>
+        </div>
+        <div class="theme-chips">
+          <div class="chip" onclick="setTheme('أنواع الطعام')">🍕 طعام</div>
+          <div class="chip" onclick="setTheme('دول العالم')">🌍 دول</div>
+          <div class="chip" onclick="setTheme('ألعاب الفيديو')">🎮 ألعاب</div>
+          <div class="chip" onclick="setTheme('الحيوانات')">🐾 حيوانات</div>
+          <div class="chip" onclick="setTheme('الرياضة')">⚽ رياضة</div>
+          <div class="chip" onclick="setTheme('أفلام ومسلسلات')">🎬 أفلام</div>
+          <div class="chip" onclick="setTheme('مهن وأعمال')">💼 مهن</div>
+          <div class="chip" onclick="setTheme('أماكن سياحية')">✈️ سياحة</div>
+          <div class="chip" onclick="setTheme('الفضاء والكواكب')">🚀 فضاء</div>
+          <div class="chip" onclick="setTheme('الموسيقى')">🎵 موسيقى</div>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">عدد الأغراب</div>
+        <div class="impostor-toggle">
+          <button class="toggle-btn active" onclick="setImpostorCount(1)" id="imp-1">1 غريب</button>
+          <button class="toggle-btn" onclick="setImpostorCount(2)" id="imp-2">2 غريب</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-label">وقت النقاش</div>
+        <div class="timer-presets" style="margin:0">
+          <button class="preset-btn sel" onclick="setTimerPreset(180,this)">3 دقائق</button>
+          <button class="preset-btn" onclick="setTimerPreset(300,this)">5 دقائق</button>
+          <button class="preset-btn" onclick="setTimerPreset(600,this)">10 دقائق</button>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="start-game-btn" onclick="startGame()">🎮 ابدأ اللعبة</button>
+    </div>
+
+    <div id="guest-waiting" class="hidden">
+      <div class="info-bar teal" style="margin-top:16px">
+        ⏳ في انتظار المضيف لبدء اللعبة...
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ STEP 2: REVEAL PHASE ══════════════════════════════ -->
+  <div class="card hidden" id="step2">
+    <div class="section-title">اكشف دورك بسرية</div>
+
+    <div class="info-bar" id="game-info-bar">
+      اضغط على اسمك لترى دورك 🤫 — الموضوع: <strong id="theme-display">—</strong>
+    </div>
+
+    <div class="reveal-status">
+      <span style="font-size:12px;color:var(--gray)">الكشف:</span>
+      <strong id="reveal-count">0</strong><span style="font-size:12px;color:var(--gray)">/ <span id="reveal-total">5</span></span>
+      <div class="progress-bar"><div class="progress-fill" id="reveal-progress" style="width:0%"></div></div>
+    </div>
+
+    <div class="players-grid" id="players-grid"></div>
+
+    <div id="all-revealed-msg" class="info-bar teal hidden">
+      ✅ الجميع كشف دوره! يمكنكم بدء النقاش الآن.
+    </div>
+
+    <button class="btn btn-teal" id="go-discuss-btn" onclick="goDiscuss()" style="display:none">💬 انتقل للنقاش والتصويت</button>
+  </div>
+
+  <!-- ══ STEP 3: DISCUSSION + TIMER + CHAT ════════════════ -->
+  <div class="card hidden" id="step3">
+    <div class="section-title">مرحلة النقاش</div>
+
+    <!-- Timer (synchronized with server) -->
+    <div class="timer-section">
+      <div class="timer-label">⏱ وقت النقاش — مزامنة مع الخادم</div>
+      <div class="timer-display" id="timer-display">03:00</div>
+      <div class="timer-ring"><div class="timer-fill" id="timer-fill" style="width:100%"></div></div>
+      <div class="timer-btns" id="timer-host-btns">
+        <button class="timer-btn active" id="timer-start-btn" onclick="toggleTimer()">▶ ابدأ</button>
+        <button class="timer-btn" onclick="resetTimer()">↺ إعادة</button>
+      </div>
+    </div>
+
+    <!-- Chat (synced via socket) -->
+    <div class="chat-section">
+      <div class="chat-header">
+        💬 الدردشة المباشرة
+        <button class="chat-toggle" onclick="toggleChat()" id="chat-toggle-btn">▼</button>
+      </div>
+      <div id="chat-body">
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <div class="typing-indicator" id="typing-indicator"></div>
+        <div class="emoji-bar">
+          <button class="emoji-btn" onclick="sendEmoji('😂')">😂</button>
+          <button class="emoji-btn" onclick="sendEmoji('😱')">😱</button>
+          <button class="emoji-btn" onclick="sendEmoji('👏')">👏</button>
+          <button class="emoji-btn" onclick="sendEmoji('🤔')">🤔</button>
+          <button class="emoji-btn" onclick="sendEmoji('😤')">😤</button>
+          <button class="emoji-btn" onclick="sendEmoji('🎭')">🎭</button>
+          <button class="emoji-btn" onclick="sendEmoji('🔥')">🔥</button>
+          <button class="emoji-btn" onclick="sendEmoji('👀')">👀</button>
+        </div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chat-input" placeholder="اكتب رسالة..." maxlength="120"
+            oninput="handleTyping()" onkeydown="if(event.key==='Enter')sendMsg()">
+          <button class="send-btn" onclick="sendMsg()">↑</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="go-vote-btn" onclick="goVote()">🗳️ انتقل للتصويت</button>
+  </div>
+
+  <!-- ══ STEP 4: VOTING ════════════════════════════════════ -->
+  <div class="card hidden" id="step4">
+    <div class="section-title">التصويت</div>
+    <div class="info-bar">
+      🗳️ صوّت لصالح من تعتقد أنه <strong>الغريب</strong>! الأكثر أصوات سيُحذف.
+    </div>
+    <div class="vote-grid" id="vote-grid"></div>
+    <div id="vote-stats" style="font-size:12px;color:var(--gray);text-align:center;margin:8px 0;"></div>
+    <button class="btn btn-primary hidden" id="reveal-result-btn" onclick="revealResult()">🔍 اكشف النتيجة</button>
+    <button class="btn btn-secondary" onclick="goStep(3)">← رجوع للنقاش</button>
+  </div>
+
+  <!-- ══ STEP 5: RESULTS ══════════════════════════════════ -->
+  <div class="card hidden" id="step5">
+    <div class="section-title">النتيجة</div>
+    <div id="result-banner-wrap"></div>
+    <div class="section-title" style="margin-top:20px">كشف الأدوار</div>
+    <div class="result-reveals" id="result-reveals"></div>
+    <div class="divider"></div>
+    <div class="section-title">إحصائيات اللعبة</div>
+    <div class="stats-grid" id="stats-grid"></div>
+    <button class="btn btn-gold hidden" id="new-round-btn" onclick="newRound()">⚡ جولة جديدة — نفس اللاعبين</button>
+    <button class="btn btn-secondary" onclick="confirmReset()">🏠 القائمة الرئيسية</button>
+  </div>
+
+</div><!-- /page -->
+
+<!-- REVEAL OVERLAY -->
+<div class="reveal-overlay hidden" id="reveal-overlay">
+  <div class="reveal-box" id="reveal-box">
+    <span class="reveal-icon" id="reveal-icon"></span>
+    <div class="reveal-role" id="reveal-role-text"></div>
+    <div class="reveal-pname" id="reveal-pname"></div>
+    <div class="reveal-word" id="reveal-word"></div>
+    <p class="reveal-desc" id="reveal-desc"></p>
+    <button class="close-reveal" id="close-reveal-btn" onclick="closeReveal()">فهمت! أغلق ✓</button>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div class="modal-overlay hidden" id="confirm-modal">
+  <div class="modal-box">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">هل أنت متأكد؟</div>
+    <div class="modal-sub">ستُفقد جميع بيانات الجولة الحالية.</div>
+    <div class="modal-btns">
+      <button class="modal-confirm" onclick="doReset()">نعم، إعادة</button>
+      <button class="modal-cancel" onclick="hideModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- TIMER ALERT OVERLAY -->
+<div class="reveal-overlay hidden" id="timer-alert">
+  <div class="reveal-box" style="background:rgba(230,57,70,.1);border-color:rgba(230,57,70,.4)">
+    <span class="reveal-icon">⏰</span>
+    <div class="reveal-role" style="color:var(--red)">انتهى الوقت</div>
+    <div class="reveal-pname" style="color:var(--red)">وقت النقاش انتهى!</div>
+    <p class="reveal-desc">حان وقت التصويت الآن 🗳️</p>
+    <button class="close-reveal" style="background:var(--red);color:white" onclick="closeTimerAlert()">انتقل للتصويت</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════════════════
+const COLORS = ['#e63946','#f4a261','#2ec4b6','#6c63ff','#f72585','#4cc9f0','#06d6a0','#ffd166','#ef476f','#118ab2','#a8dadc','#457b9d','#e9c46a','#f77f00','#90be6d'];
+const EMOJIS = ['🚀','⭐','🌙','🔥','💥','🎯','⚡','🌊','🎭','🏆','👾','🎲','🔮','💎','🌸'];
+const THEMES = ['الفواكه والخضروات','أنواع الطعام','دول العالم','ألعاب الفيديو','الحيوانات البرية','الرياضة العالمية','أفلام ديزني','مهن وأعمال','أماكن سياحية','مشاهير العالم','الفضاء والكواكب','الألوان والأشكال','الموسيقى والفنانين','الكتب الشهيرة','الطقس والمناخ'];
+
+// ══════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════
+let state = {
+  // Connection
+  room: '',
+  myName: '',
+  isHost: false,
+  connected: false,
+
+  // Game
+  players: [],           // all player names from server
+  myIndex: -1,           // my position in players array
+  isImpostor: false,
+  theme: null,           // null if impostor
+  impostorCount: 1,
+  revealedPlayers: [],   // indices that have revealed
+  myRevealed: false,
+
+  // Timer
+  timerDuration: 180,
+  timerRemaining: 180,
+  timerRunning: false,
+  timerInterval: null,
+
+  // Chat
+  typingTimeout: null,
+
+  // Vote
+  myVote: -1,            // index I voted for
+  voteCounts: [],
+
+  // Result
+  stats: {crewWins:0, impostorWins:0, rounds:0, correctVotes:0},
+
+  // UI
+  soundOn: true,
+  chatVisible: true,
+  currentStep: 0,
+};
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET.IO SETUP
+// ══════════════════════════════════════════════════════════
+const socket = io({
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+});
+
+// Connection events
+socket.on('connect', () => {
+  state.connected = true;
+  updateConnBadge(true);
+  showToast('✅ متصل بالخادم');
+  console.log('[Socket] Connected:', socket.id);
+});
+
+socket.on('disconnect', () => {
+  state.connected = false;
+  updateConnBadge(false);
+  showToast('⚠️ انقطع الاتصال — جاري إعادة الاتصال...');
+});
+
+socket.on('connect_error', (err) => {
+  updateConnBadge(false);
+  console.error('[Socket] Connection error:', err);
+});
+
+function updateConnBadge(connected) {
+  const badge = document.getElementById('conn-badge');
+  const text = document.getElementById('conn-text');
+  badge.className = 'conn-badge ' + (connected ? 'connected' : 'disconnected');
+  text.textContent = connected ? 'متصل' : 'غير متصل';
+}
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET LISTENERS — LOBBY
+// ══════════════════════════════════════════════════════════
+
+socket.on('joined', (data) => {
+  state.room = data.room;
+  state.myName = data.player_name;
+  state.isHost = data.is_host;
+  state.players = data.players;
+
+  document.getElementById('room-code-text').textContent = data.room;
+  updateLobbyPlayers(data.players);
+
+  // Show host or guest UI
+  document.getElementById('host-settings').classList.toggle('hidden', !state.isHost);
+  document.getElementById('guest-waiting').classList.toggle('hidden', state.isHost);
+
+  // Start game btn state
+  updateStartBtn();
+  goStep(1);
+  showToast(`🎉 انضممت لغرفة ${data.room}`);
+});
+
+socket.on('player_joined', (data) => {
+  state.players = data.players;
+  updateLobbyPlayers(data.players);
+  updateStartBtn();
+  showToast(`👋 ${data.player} انضم للغرفة!`);
+  playSound('click');
+});
+
+socket.on('player_left', (data) => {
+  state.players = data.players;
+  updateLobbyPlayers(data.players);
+  updateStartBtn();
+  showToast(`👋 ${data.player} غادر الغرفة`);
+});
+
+socket.on('host_changed', (data) => {
+  showToast(`👑 ${data.host} أصبح المضيف الجديد`);
+});
+
+socket.on('error', (data) => {
+  showToast('❌ ' + data.msg);
+  playSound('timerEnd');
+});
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET LISTENERS — GAME START & REVEAL
+// ══════════════════════════════════════════════════════════
+
+socket.on('game_started', (data) => {
+  // This event is private per player (contains their role)
+  state.players = data.players;
+  state.myIndex = data.player_index;
+  state.isImpostor = data.is_impostor;
+  state.theme = data.theme; // null for impostor
+  state.impostorCount = data.impostor_count;
+  state.revealedPlayers = [];
+  state.myRevealed = false;
+  state.myVote = -1;
+  state.voteCounts = Array(data.total_players).fill(0);
+
+  document.getElementById('theme-display').textContent = data.theme || '(الغريب لا يعرف الموضوع)';
+  document.getElementById('reveal-total').textContent = data.total_players;
+  buildPlayersGrid();
+  updateRevealStatus();
+
+  goStep(2);
+  playSound('start');
+  showToast('🎮 اللعبة بدأت! اكشف دورك بسرية');
+});
+
+socket.on('game_state', (data) => {
+  // Broadcast state update (for late joiners / sync)
+  state.players = data.players;
+});
+
+socket.on('reveal_status_update', (data) => {
+  state.revealedPlayers = data.revealed_players;
+  updateRevealStatus();
+
+  // Mark revealed cards
+  data.revealed_players.forEach(idx => {
+    const card = document.getElementById(`pcard-${idx}`);
+    if (card && !card.classList.contains('done-card')) {
+      card.classList.add('done-card');
+      const icon = card.querySelector('.p-revealed-icon');
+      if (icon) { icon.textContent = '✓'; icon.style.background='rgba(46,196,182,.3)'; icon.style.color=COLORS[idx]; }
+      const tap = card.querySelector('.p-tap');
+      if (tap) tap.textContent = 'تم الكشف ✓';
+    }
+  });
+
+  if (data.all_revealed) {
+    document.getElementById('all-revealed-msg').classList.remove('hidden');
+    const goBtn = document.getElementById('go-discuss-btn');
+    goBtn.style.display = '';
+    if (!state.isHost) goBtn.style.display = 'none'; // Only host navigates
+    playSound('allRevealed');
+    addSystemMsg('✅ الجميع كشف دوره! في انتظار المضيف لبدء النقاش.');
+  }
+});
+
+socket.on('all_revealed', (data) => {
+  addSystemMsg(data.message);
+});
+
+socket.on('phase_changed', (data) => {
+  if (data.phase === 'discuss') {
+    goStep(3);
+    addSystemMsg('💬 بدأت مرحلة النقاش!');
+  } else if (data.phase === 'vote') {
+    buildVoteGrid();
+    goStep(4);
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET LISTENERS — TIMER (SYNCHRONIZED)
+// ══════════════════════════════════════════════════════════
+
+socket.on('timer_started', (data) => {
+  state.timerDuration = data.duration;
+  state.timerRemaining = data.duration;
+  state.timerRunning = true;
+  clearInterval(state.timerInterval);
+  document.getElementById('timer-start-btn').textContent = '⏸ إيقاف';
+  document.getElementById('timer-start-btn').classList.add('active');
+  updateTimerDisplay();
+  showToast('⏱ بدأ المؤقت!');
+});
+
+socket.on('timer_tick', (data) => {
+  state.timerRemaining = data.remaining;
+  state.timerDuration = data.total;
+  updateTimerDisplay();
+});
+
+socket.on('timer_paused', (data) => {
+  state.timerRunning = false;
+  state.timerRemaining = data.remaining;
+  document.getElementById('timer-start-btn').textContent = '▶ استمرار';
+  document.getElementById('timer-start-btn').classList.remove('active');
+  updateTimerDisplay();
+  showToast('⏸ تم إيقاف المؤقت');
+});
+
+socket.on('timer_reset', (data) => {
+  state.timerRemaining = data.remaining;
+  state.timerDuration = data.duration;
+  state.timerRunning = false;
+  document.getElementById('timer-start-btn').textContent = '▶ ابدأ';
+  document.getElementById('timer-start-btn').classList.remove('active');
+  updateTimerDisplay();
+});
+
+socket.on('timer_ended', (data) => {
+  state.timerRunning = false;
+  state.timerRemaining = 0;
+  updateTimerDisplay();
+  document.getElementById('timer-alert').classList.remove('hidden');
+  playSound('timerEnd');
+  showToast('⏰ ' + data.message);
+});
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET LISTENERS — CHAT
+// ══════════════════════════════════════════════════════════
+
+socket.on('chat_message', (data) => {
+  const isMine = data.sender === state.myName;
+  const idx = state.players.indexOf(data.sender);
+  const color = idx >= 0 ? COLORS[idx] : '#8888aa';
+
+  if (data.emoji_only) {
+    spawnFloatingEmoji(data.message);
+  }
+  appendChatMsg(data.sender, data.message, isMine ? 'mine' : '', color);
+  playSound('click');
+});
+
+socket.on('player_typing', (data) => {
+  const el = document.getElementById('typing-indicator');
+  if (data.is_typing) {
+    el.textContent = `${data.player} يكتب...`;
+    clearTimeout(state.typingClearTimeout);
+    state.typingClearTimeout = setTimeout(() => el.textContent='', 3000);
+  } else {
+    el.textContent = '';
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+//  SOCKET LISTENERS — VOTING & RESULT
+// ══════════════════════════════════════════════════════════
+
+socket.on('vote_update', (data) => {
+  state.voteCounts = data.vote_counts;
+  const maxV = Math.max(...data.vote_counts, 0);
+  data.vote_counts.forEach((cnt, i) => {
+    const numEl = document.getElementById(`vcnt-${i}`);
+    const barEl = document.getElementById(`vbar-${i}`);
+    if (numEl) numEl.textContent = `${cnt} أصوات`;
+    if (barEl) barEl.style.width = maxV > 0 ? cnt/maxV*100+'%' : '0%';
+  });
+  document.getElementById('vote-stats').textContent =
+    `تم تسجيل ${data.voters_count} من أصل ${data.total_players} أصوات`;
+
+  if (state.isHost && data.voters_count >= data.total_players) {
+    document.getElementById('reveal-result-btn').classList.remove('hidden');
+  }
+});
+
+socket.on('game_result', (data) => {
+  state.stats = data.stats;
+  buildResultScreen(data);
+  goStep(5);
+  playSound(data.was_impostor ? 'crewWin' : 'impostorWin');
+  if (state.isHost) {
+    document.getElementById('new-round-btn').classList.remove('hidden');
+  }
+});
+
+socket.on('new_round_started', (data) => {
+  state.revealedPlayers = [];
+  state.myRevealed = false;
+  state.myVote = -1;
+  state.voteCounts = [];
+  state.stats = data.stats;
+  goStep(1);
+  showToast('♻️ جولة جديدة! المضيف سيبدأ قريباً.');
+});
+
+// ══════════════════════════════════════════════════════════
+//  JOIN / CREATE
+// ══════════════════════════════════════════════════════════
+
+function joinOrCreate() {
+  const name = document.getElementById('my-name-input').value.trim();
+  const roomRaw = document.getElementById('room-code-input').value.trim().toUpperCase();
+
+  if (!name) { showToast('⚠️ أدخل اسمك أولاً'); return; }
+
+  // Generate room code if empty
+  const room = roomRaw || generateRoomCode();
+
+  state.myName = name;
+  state.room = room;
+
+  socket.emit('join_room', { room, player_name: name });
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  return Array.from({length:4}, ()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+
+function copyRoomCode() {
+  navigator.clipboard.writeText(state.room).then(() => showToast('📋 تم نسخ كود الغرفة!'));
+}
+
+// ══════════════════════════════════════════════════════════
+//  LOBBY UI
+// ══════════════════════════════════════════════════════════
+
+function updateLobbyPlayers(players) {
+  const container = document.getElementById('lobby-players');
+  container.innerHTML = '';
+  players.forEach((name, i) => {
+    const isMe = name === state.myName;
+    const isHost = i === 0; // first player is host
+    const div = document.createElement('div');
+    div.className = 'lobby-player';
+    div.style.animationDelay = `${i*.05}s`;
+    div.innerHTML = `
+      <div class="p-avatar" style="background:${COLORS[i]}22;border:2px solid ${COLORS[i]}55">
+        <span>${EMOJIS[i]}</span>
+      </div>
+      <div>
+        <div class="p-name" style="color:${isMe ? COLORS[i] : 'var(--white)'}">${name}${isMe ? ' (أنت)' : ''}</div>
+        ${isHost ? '<div class="p-host">👑 المضيف</div>' : ''}
+      </div>
+    `;
+    container.appendChild(div);
+  });
+
+  const waitEl = document.getElementById('waiting-text');
+  waitEl.textContent = `${players.length} لاعب في الغرفة${players.length >= 3 ? ' — جاهز للبدء!' : ' — يحتاج 3 على الأقل'}`;
+}
+
+function updateStartBtn() {
+  const btn = document.getElementById('start-game-btn');
+  if (btn) btn.disabled = state.players.length < 3;
+}
+
+// ══════════════════════════════════════════════════════════
+//  HOST SETTINGS
+// ══════════════════════════════════════════════════════════
+
+let selectedTimerDuration = 180;
+let selectedImpostorCount = 1;
+
+function setTheme(t) { document.getElementById('theme-input').value = t; }
+function randomTheme() {
+  setTheme(THEMES[Math.floor(Math.random() * THEMES.length)]);
+  playSound('click');
+}
+function setImpostorCount(n) {
+  selectedImpostorCount = n;
+  document.getElementById('imp-1').classList.toggle('active', n===1);
+  document.getElementById('imp-2').classList.toggle('active', n===2);
+}
+function setTimerPreset(secs, btn) {
+  selectedTimerDuration = secs;
+  document.querySelectorAll('.timer-presets .preset-btn').forEach(b=>b.classList.remove('sel'));
+  btn.classList.add('sel');
+}
+
+function startGame() {
+  const theme = document.getElementById('theme-input').value.trim();
+  socket.emit('start_game', {
+    room: state.room,
+    theme,
+    impostor_count: selectedImpostorCount,
+    timer_seconds: selectedTimerDuration,
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+//  REVEAL PHASE
+// ══════════════════════════════════════════════════════════
+
+function buildPlayersGrid() {
+  const grid = document.getElementById('players-grid');
+  grid.innerHTML = '';
+  state.players.forEach((name, i) => {
+    const isMe = i === state.myIndex;
+    const card = document.createElement('div');
+    card.className = 'player-card' + (isMe ? ' my-card' : '');
+    card.id = `pcard-${i}`;
+    card.style.animationDelay = `${i*.06}s`;
+    card.innerHTML = `
+      <div class="p-avatar" style="background:${COLORS[i]}22;border:2px solid ${COLORS[i]}55">
+        <span style="font-size:22px">${EMOJIS[i]}</span>
+      </div>
+      ${isMe ? '<div class="p-revealed-icon" style="background:rgba(255,209,102,.2);color:var(--gold)">★</div>' : '<div class="p-revealed-icon"></div>'}
+      <div class="p-name">${name}</div>
+      <div class="p-tap">${isMe ? 'اضغط هنا 👆' : 'بانتظار الكشف...'}</div>
+    `;
+    if (isMe) {
+      card.onclick = () => revealMyRole();
+    }
+    grid.appendChild(card);
+  });
+}
+
+function revealMyRole() {
+  if (state.myRevealed) {
+    showToast('✅ لقد كشفت دورك بالفعل');
+    return;
+  }
+
+  const overlay = document.getElementById('reveal-overlay');
+  const box = document.getElementById('reveal-box');
+  overlay.classList.remove('hidden');
+  box.className = `reveal-box ${state.isImpostor ? 'impostor-theme' : 'crew-theme'}`;
+
+  document.getElementById('reveal-icon').textContent = state.isImpostor ? '👾' : '🧑‍🚀';
+  document.getElementById('reveal-role-text').textContent = state.isImpostor ? '⚠ أنت الغريب' : '✓ أنت من الفريق';
+  document.getElementById('reveal-pname').textContent = state.myName;
+
+  if (state.isImpostor) {
+    document.getElementById('reveal-word').textContent = '🚫 لا تعرف الموضوع';
+    document.getElementById('reveal-desc').textContent =
+      `الجميع يعرف الموضوع إلا أنت! حاول أن تتظاهر وتكشف الموضوع من خلال الحديث دون أن ينكشف أمرك. 🎭`;
+  } else {
+    document.getElementById('reveal-word').textContent = `📌 الموضوع: ${state.theme}`;
+    document.getElementById('reveal-desc').textContent =
+      `أنت من الفريق! الموضوع هو "${state.theme}". حاول اكتشاف من بينكم لا يعرف الموضوع. 🔍`;
+  }
+  playSound(state.isImpostor ? 'impostor' : 'crew');
+}
+
+function closeReveal() {
+  document.getElementById('reveal-overlay').classList.add('hidden');
+
+  if (!state.myRevealed) {
+    state.myRevealed = true;
+    // Notify server
+    socket.emit('reveal_role', {
+      room: state.room,
+      player_index: state.myIndex,
+    });
+    // Mark my own card
+    const card = document.getElementById(`pcard-${state.myIndex}`);
+    if (card) {
+      card.classList.add('done-card');
+      const tap = card.querySelector('.p-tap');
+      if (tap) tap.textContent = 'تم الكشف ✓';
+    }
+  }
+}
+
+function updateRevealStatus() {
+  const revealed = state.revealedPlayers.length;
+  const total = state.players.length;
+  document.getElementById('reveal-count').textContent = revealed;
+  document.getElementById('reveal-total').textContent = total;
+  document.getElementById('reveal-progress').style.width = total > 0 ? (revealed/total*100)+'%' : '0%';
+}
+
+function goDiscuss() {
+  // Host navigates everyone to discuss
+  socket.emit('go_phase', { room: state.room, phase: 'discuss' });
+}
+
+// ══════════════════════════════════════════════════════════
+//  TIMER (server-controlled, client just displays)
+// ══════════════════════════════════════════════════════════
+
+let timerIsRunning = false;
+
+function toggleTimer() {
+  if (!state.isHost) return;
+  if (!timerIsRunning) {
+    socket.emit('start_timer', { room: state.room, duration: selectedTimerDuration });
+    timerIsRunning = true;
+  } else {
+    socket.emit('pause_timer', { room: state.room });
+    timerIsRunning = false;
+  }
+}
+
+function resetTimer() {
+  if (!state.isHost) return;
+  timerIsRunning = false;
+  socket.emit('reset_timer', { room: state.room, duration: selectedTimerDuration });
+}
+
+function updateTimerDisplay() {
+  const remaining = state.timerRemaining;
+  const total = state.timerDuration || selectedTimerDuration;
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  const display = document.getElementById('timer-display');
+  const fill = document.getElementById('timer-fill');
+  if (!display || !fill) return;
+
+  display.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  const pct = total > 0 ? (remaining / total * 100) : 0;
+  fill.style.width = pct + '%';
+
+  const isWarning = remaining <= 30 && remaining > 0;
+  display.classList.toggle('warning', isWarning);
+  fill.classList.toggle('warning', isWarning);
+}
+
+// Only host sees timer control buttons
+function updateTimerControlVisibility() {
+  const hostBtns = document.getElementById('timer-host-btns');
+  if (hostBtns) hostBtns.style.display = state.isHost ? '' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════
+//  CHAT (real-time via socket)
+// ══════════════════════════════════════════════════════════
+
+function sendMsg() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  socket.emit('chat_message', {
+    room: state.room,
+    sender: state.myName,
+    message: msg,
+    emoji_only: false,
+  });
+  // Stop typing
+  socket.emit('typing', { room: state.room, player: state.myName, is_typing: false });
+}
+
+function sendEmoji(emoji) {
+  socket.emit('chat_message', {
+    room: state.room,
+    sender: state.myName,
+    message: emoji,
+    emoji_only: true,
+  });
+  spawnFloatingEmoji(emoji);
+}
+
+function handleTyping() {
+  socket.emit('typing', { room: state.room, player: state.myName, is_typing: true });
+  clearTimeout(state.typingTimeout);
+  state.typingTimeout = setTimeout(() => {
+    socket.emit('typing', { room: state.room, player: state.myName, is_typing: false });
+  }, 2000);
+}
+
+function appendChatMsg(sender, text, extraClass='', color='#8888aa') {
+  const container = document.getElementById('chat-msgs');
+  const div = document.createElement('div');
+  div.className = `chat-msg ${extraClass}`;
+  const isSystem = extraClass === 'system';
+  div.innerHTML = isSystem ? `<div class="msg-bubble">${text}</div>` : `
+    <div>
+      <div class="msg-name" style="color:${color}">${sender}</div>
+      <div class="msg-bubble">${text}</div>
+    </div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function addSystemMsg(text) {
+  appendChatMsg('', text, 'system');
+}
+
+function toggleChat() {
+  const body = document.getElementById('chat-body');
+  const btn = document.getElementById('chat-toggle-btn');
+  state.chatVisible = !state.chatVisible;
+  body.style.display = state.chatVisible ? '' : 'none';
+  btn.textContent = state.chatVisible ? '▼' : '▶';
+}
+
+function spawnFloatingEmoji(emoji) {
+  const el = document.createElement('div');
+  el.className = 'floating-emoji';
+  el.textContent = emoji;
+  el.style.left = (20 + Math.random() * 60) + '%';
+  el.style.bottom = '80px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1600);
+}
+
+// ══════════════════════════════════════════════════════════
+//  VOTING
+// ══════════════════════════════════════════════════════════
+
+function goVote() {
+  if (state.isHost) {
+    socket.emit('go_phase', { room: state.room, phase: 'vote' });
+  }
+}
+
+function buildVoteGrid() {
+  const grid = document.getElementById('vote-grid');
+  grid.innerHTML = '';
+  state.voteCounts = Array(state.players.length).fill(0);
+
+  state.players.forEach((name, i) => {
+    const card = document.createElement('div');
+    card.className = 'vote-card';
+    card.id = `vcard-${i}`;
+    card.style.animationDelay = `${i*.05}s`;
+    card.innerHTML = `
+      <div style="font-size:30px;margin-bottom:8px">${EMOJIS[i]}</div>
+      <div style="font-size:13px;font-weight:700;color:${COLORS[i]};margin-bottom:6px">${name}</div>
+      <div class="vote-count-num" id="vcnt-${i}">0 أصوات</div>
+      <div class="vote-count-bar" id="vbar-${i}" style="width:0%"></div>
+    `;
+    card.onclick = () => castVote(i);
+    grid.appendChild(card);
+  });
+}
+
+function castVote(targetIdx) {
+  if (state.myVote >= 0) return; // already voted
+  state.myVote = targetIdx;
+
+  document.querySelectorAll('.vote-card').forEach(c => c.classList.add('voted-card'));
+  document.getElementById(`vcard-${targetIdx}`).classList.add('my-vote');
+
+  socket.emit('cast_vote', {
+    room: state.room,
+    voter_name: state.myName,
+    target_index: targetIdx,
+  });
+  playSound('click');
+  showToast(`🗳️ صوّتت ضد ${state.players[targetIdx]}`);
+}
+
+function revealResult() {
+  if (!state.isHost) return;
+  socket.emit('reveal_result', { room: state.room });
+}
+
+// ══════════════════════════════════════════════════════════
+//  RESULTS
+// ══════════════════════════════════════════════════════════
+
+function buildResultScreen(data) {
+  const eliminated = data.eliminated_name;
+  const wasImpostor = data.was_impostor;
+
+  // Banner
+  const banner = document.getElementById('result-banner-wrap');
+  const win = wasImpostor ? 'crew-wins' : 'impostor-wins';
+  const winIcon = wasImpostor ? '🏆' : '👾';
+  const winTitle = wasImpostor ? 'فاز الفريق!' : 'فاز الغريب!';
+  const winSub = wasImpostor
+    ? `تم اكتشاف الغريب "${eliminated}" بنجاح! 🎉`
+    : `الغريب نجا من الاكتشاف! الفريق خسر 😱`;
+
+  banner.innerHTML = `
+    <div class="result-banner ${win}">
+      <span class="result-icon">${winIcon}</span>
+      <div class="result-title">${winTitle}</div>
+      <div class="result-sub">${winSub}</div>
+      <div style="font-size:13px;color:var(--gray)">
+        ✂️ المُصوَّت عليه: <strong style="color:var(--white)">${eliminated}</strong>
+        (${data.vote_counts[data.eliminated_index]} أصوات)
+      </div>
+    </div>`;
+
+  // Role reveals
+  const reveals = document.getElementById('result-reveals');
+  reveals.innerHTML = '';
+  data.roles.forEach((r, i) => {
+    const card = document.createElement('div');
+    card.className = `result-player-card ${r.is_impostor ? 'is-impostor' : 'is-crew'}`;
+    card.style.animationDelay = `${i*.05}s`;
+    card.innerHTML = `
+      <div style="font-size:28px;margin-bottom:6px">${EMOJIS[i]}</div>
+      <div style="font-size:13px;font-weight:700;color:${COLORS[i]}">${r.name}</div>
+      <div class="result-role-badge" style="color:${r.is_impostor?'var(--red)':'var(--teal)'}">
+        ${r.is_impostor ? '👾 غريب' : '🧑‍🚀 فريق'}
+      </div>
+      <div style="font-size:10px;color:var(--gray);margin-top:4px">${r.votes||0} أصوات</div>`;
+    reveals.appendChild(card);
+  });
+
+  // Stats
+  const sg = document.getElementById('stats-grid');
+  const s = data.stats;
+  sg.innerHTML = `
+    <div class="stat-box"><div class="stat-num" style="color:var(--teal)">${s.crewWins}</div><div class="stat-label">انتصارات الفريق</div></div>
+    <div class="stat-box"><div class="stat-num" style="color:var(--red)">${s.impostorWins}</div><div class="stat-label">انتصارات الغريب</div></div>
+    <div class="stat-box"><div class="stat-num" style="color:var(--gold)">${s.rounds}</div><div class="stat-label">مجموع الجولات</div></div>
+    <div class="stat-box"><div class="stat-num" style="color:var(--purple)">${s.correctVotes}</div><div class="stat-label">أصوات صحيحة</div></div>`;
+
+  // Reveal theme to impostor
+  document.getElementById('result-banner-wrap').insertAdjacentHTML('beforeend',
+    `<div class="info-bar gold" style="margin-top:12px">🎯 الموضوع كان: <strong>${data.theme}</strong></div>`
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+//  NEW ROUND / RESET
+// ══════════════════════════════════════════════════════════
+
+function newRound() {
+  if (!state.isHost) { showToast('فقط المضيف يمكنه بدء جولة جديدة'); return; }
+  socket.emit('new_round', { room: state.room });
+}
+
+function confirmReset() { document.getElementById('confirm-modal').classList.remove('hidden'); }
+function hideModal() { document.getElementById('confirm-modal').classList.add('hidden'); }
+function doReset() {
+  hideModal();
+  // Return to join screen
+  state = {
+    room:'', myName:'', isHost:false, connected:state.connected,
+    players:[], myIndex:-1, isImpostor:false, theme:null,
+    impostorCount:1, revealedPlayers:[], myRevealed:false,
+    timerDuration:180, timerRemaining:180, timerRunning:false, timerInterval:null,
+    typingTimeout:null, myVote:-1, voteCounts:[], stats:{crewWins:0,impostorWins:0,rounds:0,correctVotes:0},
+    soundOn:state.soundOn, chatVisible:true, currentStep:0,
+  };
+  socket.disconnect();
+  socket.connect();
+  goStep(0);
+}
+
+// ══════════════════════════════════════════════════════════
+//  TIMER ALERT
+// ══════════════════════════════════════════════════════════
+
+function closeTimerAlert() {
+  document.getElementById('timer-alert').classList.add('hidden');
+  if (state.isHost) {
+    socket.emit('go_phase', { room: state.room, phase: 'vote' });
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  STEP NAV
+// ══════════════════════════════════════════════════════════
+
+const STEP_IDS = ['step0','step1','step2','step3','step4','step5'];
+function goStep(n) {
+  STEP_IDS.forEach((id, i) => document.getElementById(id).classList.toggle('hidden', i !== n));
+  state.currentStep = n;
+
+  // Update dots (steps 1-5 map to dots 1-5, step0 and step1 both use dot1)
+  const dotN = Math.max(1, Math.min(n, 5));
+  for (let i = 1; i <= 5; i++) {
+    const d = document.getElementById('dot'+i);
+    d.classList.remove('active','done');
+    if (i === dotN) d.classList.add('active');
+    else if (i < dotN) d.classList.add('done');
+  }
+
+  // Update timer controls visibility
+  if (n === 3) updateTimerControlVisibility();
+}
+
+// ══════════════════════════════════════════════════════════
+//  SOUND
+// ══════════════════════════════════════════════════════════
+
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function getCtx() { if (!audioCtx) audioCtx = new AudioCtx(); return audioCtx; }
+
+function playSound(type) {
+  if (!state.soundOn) return;
+  try {
+    const ctx = getCtx();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    const t = ctx.currentTime;
+    const sounds = {
+      click:       {f:[600],d:.08,wt:'sine',gv:.15},
+      start:       {f:[400,600,800],d:.12,wt:'sine',gv:.2},
+      crew:        {f:[523,659,784],d:.15,wt:'sine',gv:.18},
+      impostor:    {f:[200,150,100],d:.2,wt:'sawtooth',gv:.15},
+      allRevealed: {f:[523,659,784,1047],d:.15,wt:'sine',gv:.18},
+      timerEnd:    {f:[880,440],d:.25,wt:'square',gv:.12},
+      crewWin:     {f:[523,659,784,1047,1319],d:.15,wt:'sine',gv:.2},
+      impostorWin: {f:[300,250,200,150],d:.2,wt:'sawtooth',gv:.15},
+    };
+    const s = sounds[type] || sounds.click;
+    o.type = s.wt;
+    s.f.forEach((freq, i) => o.frequency.setValueAtTime(freq, t + i * s.d));
+    g.gain.setValueAtTime(s.gv, t);
+    g.gain.exponentialRampToValueAtTime(.001, t + s.f.length * s.d + .1);
+    o.start(t); o.stop(t + s.f.length * s.d + .15);
+  } catch(e) {}
+}
+
+function toggleSound() {
+  state.soundOn = !state.soundOn;
+  document.getElementById('sound-btn').textContent = state.soundOn ? '🔊' : '🔇';
+  showToast(state.soundOn ? '🔊 الصوت مفعّل' : '🔇 الصوت مكتوم');
+}
+
+// ══════════════════════════════════════════════════════════
+//  TOAST
+// ══════════════════════════════════════════════════════════
+
+function showToast(msg) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+// ══════════════════════════════════════════════════════════
+//  STARS
+// ══════════════════════════════════════════════════════════
+
+(function() {
+  const c = document.getElementById('stars');
+  for (let i = 0; i < 90; i++) {
+    const s = document.createElement('div'); s.className = 'star';
+    const sz = Math.random() * 2 + .5;
+    s.style.cssText = `width:${sz}px;height:${sz}px;top:${Math.random()*100}%;left:${Math.random()*100}%;--dur:${2+Math.random()*5}s;animation-delay:${Math.random()*5}s;`;
+    c.appendChild(s);
+  }
+})();
+
+// ══════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════
+goStep(0);
+</script>
+</body>
+</html>
